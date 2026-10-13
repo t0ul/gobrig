@@ -29,6 +29,8 @@ const (
 	// and the Alpine mini rootfs the guest chroots into.
 	kernelURL = "https://github.com/Code-Hex/puipui-linux/releases/download/v1.0.3/puipui_linux_v1.0.3_aarch64.tar.gz"
 	rootfsURL = "https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/aarch64/alpine-minirootfs-3.20.3-aarch64.tar.gz"
+	// Static OCI runtime that runs containers inside the Brig (no daemon, no network).
+	runcURL = "https://github.com/opencontainers/runc/releases/download/v1.2.4/runc.arm64"
 )
 
 //go:embed sandbox_init.sh
@@ -46,6 +48,8 @@ func main() {
 	}{
 		{"kernel", prepareKernel},
 		{"rootfs", prepareRootFS},
+		{"runc", prepareRunc},
+		{"container bundle", prepareBundle},
 		{"guest binaries", buildGuestBinaries},
 		{"sandbox_init.sh", installInit},
 	} {
@@ -122,6 +126,43 @@ func buildGuestBinaries(dir string) error {
 
 func installInit(dir string) error {
 	return os.WriteFile(filepath.Join(dir, "sandbox_init.sh"), sandboxInit, 0o755)
+}
+
+// prepareRunc downloads the static OCI runtime that runs containers inside the Brig. It is
+// a single static arm64 binary (no daemon), served into the guest over the shared mount.
+func prepareRunc(dir string) error {
+	dest := filepath.Join(dir, "runc")
+	if _, err := os.Stat(dest); err == nil {
+		fmt.Println("runc: already present")
+		return nil
+	}
+	fmt.Println("runc: downloading static OCI runtime...")
+	if err := downloadFile(runcURL, dest); err != nil {
+		return err
+	}
+	return os.Chmod(dest, 0o755)
+}
+
+// prepareBundle lays down the container's base OCI bundle rootfs by copying the Alpine
+// rootfs. config.json is NOT baked: the host writes it per experiment with gobrig.WriteConfig
+// (so the misconfig knobs are chosen at run time). The guest runc run reads this bundle.
+func prepareBundle(dir string) error {
+	bundleRoot := filepath.Join(dir, "bundle", "rootfs")
+	if _, err := os.Stat(bundleRoot); err == nil {
+		fmt.Println("bundle: already present")
+		return nil
+	}
+	if err := os.MkdirAll(bundleRoot, 0o755); err != nil {
+		return err
+	}
+	fmt.Println("bundle: copying Alpine rootfs into the container bundle...")
+	// System cp -a preserves perms and device nodes the Go copy cannot recreate unprivileged.
+	src := filepath.Join(dir, "alpine-root") + string(os.PathSeparator) + "."
+	out, err := exec.Command("cp", "-a", src, bundleRoot).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("cp rootfs: %v: %s", err, out)
+	}
+	return nil
 }
 
 // --- inlined download / extract helpers (no verification; VM provisioning assets) ---
