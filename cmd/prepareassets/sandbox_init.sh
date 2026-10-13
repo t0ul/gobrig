@@ -19,13 +19,14 @@ fi
 
 # Assets live on a read-only virtiofs mount; the exec bit carries over from the host
 # build. Best-effort, never fatal.
-chmod +x /mnt/assets/detonationd 2>/dev/null || true
+chmod +x /mnt/assets/detonationd /mnt/assets/runc 2>/dev/null || true
 
-# Dedicated unprivileged user; ignore the error if it already exists.
-adduser -D sandbox 2>/dev/null || true
-
-echo "Starting detonationd as non-root user 'sandbox' (vsock:5000, GOBRIG set)..."
-su sandbox -c 'GOBRIG=1 /mnt/assets/detonationd' > /tmp/detonation.log 2>&1 &
+# The daemon runs as ROOT inside the Brig. The Brig is the containment boundary (a
+# disposable, egress-denied VM with no NIC), so root-in-the-guest is required and safe: a
+# benchmark must run — and then escape — misconfigured containers, which needs root to
+# create namespaces, mount, and hold caps. The VM is the wall, not the guest user.
+echo "Starting detonationd as root (vsock:5000, GOBRIG set)..."
+GOBRIG=1 /mnt/assets/detonationd > /tmp/detonation.log 2>&1 &
 echo "  detonationd started (PID $!) — tail /tmp/detonation.log to watch"
 
 echo ""
