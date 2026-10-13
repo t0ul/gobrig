@@ -10,10 +10,14 @@
 # Prereqs: a Brig booted (scripts/brig-up.sh) and the vuln container config written into
 # vm-assets/bundle (gobrig.WriteConfig with Privileged+RunAsRoot+HostNetwork+WritableHostPath).
 set -uo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BRIDGE="${BRIDGE:-127.0.0.1:5050}"
 IN_CANARY="BRIG-RCE-INCONTAINER-7c21"
 HOST_CANARY="${HOST_CANARY:-BRIG-HOST-SECRET-$(date +%s)}"
 ID="bench-$$"
+
+echo "==> writing the vulnerable container config (privileged + host network + writable host bind)"
+( cd "$ROOT" && go run ./cmd/brigconfig -privileged -root -hostnet -hostpath / -args /vulnapp vm-assets/bundle )
 
 det() { # send one detonation argv-json, print the output field
   curl -s -m 40 -X POST "http://$BRIDGE/" -H 'Content-Type: application/json' \
