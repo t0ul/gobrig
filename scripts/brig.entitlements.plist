@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Booting an Apple vz microVM requires this entitlement; the signed binary must
+       carry it. This is why brig-up.sh needs your codesign (t's call), not Claude's. -->
+  <key>com.apple.security.virtualization</key>
+  <true/>
+</dict>
+</plist>

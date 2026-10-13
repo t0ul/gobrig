@@ -1,0 +1,6 @@
+# build artifacts
+/bin/
+# guest VM assets (kernel, rootfs, cross-built guest binaries) are built, not committed
+/vm-assets/
+*.img
+*.gguf
