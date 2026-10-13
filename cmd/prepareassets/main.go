@@ -25,10 +25,16 @@ import (
 )
 
 const (
-	// VM provisioning assets (not app config): a headless aarch64 Linux kernel + initrd,
-	// and the Alpine mini rootfs the guest chroots into.
-	kernelURL = "https://github.com/Code-Hex/puipui-linux/releases/download/v1.0.3/puipui_linux_v1.0.3_aarch64.tar.gz"
-	rootfsURL = "https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/aarch64/alpine-minirootfs-3.20.3-aarch64.tar.gz"
+	// The Brig's kernel is the Kata Containers arm64 guest kernel — the same one Apple's
+	// own containerization stack boots under Virtualization.framework. It has VIRTIO
+	// compiled in (not modules) plus cgroups and the namespaces runc needs, so containers
+	// run inside the Brig. (PUI PUI, used before, is a minimal exec kernel with no cgroups
+	// and no namespaces — it cannot host containers.)
+	kataURL = "https://github.com/kata-containers/kata-containers/releases/download/3.17.0/kata-static-3.17.0-arm64.tar.xz"
+	// PUI PUI still supplies the minimal busybox initramfs (pure userland) that drives our
+	// virtiofs + chroot bring-up; only its kernel is replaced by the Kata one above.
+	initramfsSrcURL = "https://github.com/Code-Hex/puipui-linux/releases/download/v1.0.3/puipui_linux_v1.0.3_aarch64.tar.gz"
+	rootfsURL       = "https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/aarch64/alpine-minirootfs-3.20.3-aarch64.tar.gz"
 	// Static OCI runtime that runs containers inside the Brig (no daemon, no network).
 	runcURL = "https://github.com/opencontainers/runc/releases/download/v1.2.4/runc.arm64"
 )
@@ -47,6 +53,7 @@ func main() {
 		fn   func(string) error
 	}{
 		{"kernel", prepareKernel},
+		{"initramfs", prepareInitramfs},
 		{"rootfs", prepareRootFS},
 		{"runc", prepareRunc},
 		{"container bundle", prepareBundle},
@@ -61,28 +68,75 @@ func main() {
 }
 
 func prepareKernel(dir string) error {
-	if _, err := os.Stat(filepath.Join(dir, "Image")); err == nil {
+	img := filepath.Join(dir, "Image")
+	if _, err := os.Stat(img); err == nil {
 		fmt.Println("kernel: already present")
 		return nil
 	}
-	fmt.Println("kernel: downloading PUI PUI Linux...")
+	fmt.Println("kernel: downloading Kata container kernel (arm64)...")
+	tarPath := filepath.Join(dir, "kata.tar.xz")
+	if err := downloadFile(kataURL, tarPath); err != nil {
+		return err
+	}
+	defer os.Remove(tarPath)
+	ex := filepath.Join(dir, "kata-extract")
+	if err := os.MkdirAll(ex, 0o755); err != nil {
+		return err
+	}
+	defer os.RemoveAll(ex)
+	// System tar handles the .xz; the kernel lands at opt/kata/share/kata-containers/.
+	if out, err := exec.Command("tar", "-xf", tarPath, "-C", ex).CombinedOutput(); err != nil {
+		return fmt.Errorf("untar kata: %v: %s", err, out)
+	}
+	src := filepath.Join(ex, "opt", "kata", "share", "kata-containers", "vmlinux.container")
+	if _, err := os.Stat(src); err != nil {
+		if found := findFile(ex, "vmlinux.container"); found != "" {
+			src = found
+		} else {
+			return fmt.Errorf("vmlinux.container not found in the kata tarball")
+		}
+	}
+	// cp -L to dereference the versioned symlink kata ships.
+	if out, err := exec.Command("cp", "-L", src, img).CombinedOutput(); err != nil {
+		return fmt.Errorf("cp kernel: %v: %s", err, out)
+	}
+	return nil
+}
+
+// prepareInitramfs fetches the minimal busybox initramfs (from PUI PUI) that drives the
+// bring-up. Only the initrd is kept; its kernel is discarded in favour of the Kata kernel.
+func prepareInitramfs(dir string) error {
+	initrd := filepath.Join(dir, "initramfs.cpio.gz")
+	if _, err := os.Stat(initrd); err == nil {
+		fmt.Println("initramfs: already present")
+		return nil
+	}
+	fmt.Println("initramfs: downloading minimal busybox initramfs...")
 	tarPath := filepath.Join(dir, "puipui.tar.gz")
-	if err := downloadFile(kernelURL, tarPath); err != nil {
+	if err := downloadFile(initramfsSrcURL, tarPath); err != nil {
 		return err
 	}
 	defer os.Remove(tarPath)
 	if err := extractTarGz(tarPath, dir); err != nil {
 		return err
 	}
-	// The release ships Image.gz + initramfs.cpio.gz; gunzip the kernel, keep the initrd.
-	gz := filepath.Join(dir, "Image.gz")
-	if _, err := os.Stat(gz); err == nil {
-		if err := gunzipFile(gz, filepath.Join(dir, "Image")); err != nil {
-			return err
-		}
-		os.Remove(gz)
+	os.Remove(filepath.Join(dir, "Image.gz")) // discard PUI PUI's kernel; we use the Kata one
+	if _, err := os.Stat(initrd); err != nil {
+		return fmt.Errorf("initramfs.cpio.gz not found in the initramfs source tarball")
 	}
 	return nil
+}
+
+// findFile returns the first path at or under root whose base name matches name, or "".
+func findFile(root, name string) string {
+	var hit string
+	_ = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && d.Name() == name && hit == "" {
+			hit = p
+		}
+		return nil
+	})
+	return hit
 }
 
 func prepareRootFS(dir string) error {
