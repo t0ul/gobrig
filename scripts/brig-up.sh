@@ -30,5 +30,10 @@ echo "==> codesigning with the virtualization entitlement ($IDENTITY)"
 codesign --force --sign "$IDENTITY" --entitlements "$ENT" "$ROOT/bin/launchbrig"
 echo "    signed: $(codesign -dv "$ROOT/bin/launchbrig" 2>&1 | head -1 || true)"
 
-echo "==> booting the Brig on bridge $BRIDGE (egress-denied, ephemeral, no guest NIC)"
-exec "$ROOT/bin/launchbrig" -bridge "$BRIDGE" -dir "$ROOT/vm-assets" "$@"
+# -snapshot=false for now: Apple save/restore is not yet live-verified, and the golden
+# save (pause, write ~2GB VM state, resume) correlated with the launcher being killed
+# right after boot. Snapshotting is only a fast-reboot optimization; cold boot is stable.
+# Re-enable with BRIG_SNAPSHOT=true once save/restore is verified.
+SNAP="${BRIG_SNAPSHOT:-false}"
+echo "==> booting the Brig on bridge $BRIDGE (egress-denied, ephemeral, no guest NIC; snapshot=$SNAP)"
+exec "$ROOT/bin/launchbrig" -bridge "$BRIDGE" -dir "$ROOT/vm-assets" -snapshot="$SNAP" "$@"

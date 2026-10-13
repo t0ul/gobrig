@@ -135,8 +135,10 @@ func OCIConfig(s ContainerSpec) ([]byte, error) {
 	}
 
 	lx := ociLinux{
+		// No cgroup namespace: the Brig's minimal kernel does not enable it, and it is not
+		// needed for the escape classes. pid/ipc/uts/mount/network give the container boundary.
 		Namespaces: []ociNamespace{
-			{Type: "pid"}, {Type: "ipc"}, {Type: "uts"}, {Type: "mount"}, {Type: "cgroup"}, {Type: "network"},
+			{Type: "pid"}, {Type: "ipc"}, {Type: "uts"}, {Type: "mount"}, {Type: "network"},
 		},
 	}
 	if s.Privileged {
