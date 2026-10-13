@@ -4,3 +4,6 @@
 /vm-assets/
 *.img
 *.gguf
+vm-assets/vampi-root/
+vm-assets/vampi-root.tgz
+vm-assets/vampi-root.tar
