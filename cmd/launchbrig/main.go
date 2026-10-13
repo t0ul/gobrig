@@ -20,8 +20,10 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -36,7 +38,7 @@ func main() {
 	bridge := flag.String("bridge", "127.0.0.1:5050", "host address for the guest-vsock command bridge (NOT :5000 — macOS AirPlay owns it)")
 	snapshot := flag.Bool("snapshot", true, "save a golden snapshot after bring-up and fast-boot by restoring it (macOS 14+)")
 	resetEach := flag.Bool("reset-each", false, "restore the golden snapshot before each detonation for a pristine guest")
-	control := flag.String("control", "127.0.0.1:5002", "loopback control endpoint for GET /healthz and POST /reset; empty to disable")
+	control := flag.String("control", "127.0.0.1:5003", "loopback control endpoint for GET /healthz and POST /reset; empty to disable")
 	flag.Parse()
 
 	kernelPath := filepath.Join(*dir, "Image")
@@ -206,6 +208,7 @@ const bringUpCmd = "mkdir -p /mnt/assets && mount -t virtiofs assets /mnt/assets
 // startVsockBridge accepts TCP on host loopback and pipes each connection to the guest's
 // vsock listener through the chamber (which applies -reset-each).
 func startVsockBridge(ch *chamber, addr string) {
+	reclaimLoopbackPort(addr) // free the bridge from a stale launchbrig so a re-run never binds a dead VM
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		log.Printf("vsock bridge: listen %s: %v (is AirPlay on :5000? pass -bridge 127.0.0.1:5050)", addr, err)
@@ -219,4 +222,22 @@ func startVsockBridge(ch *chamber, addr string) {
 		}
 		go ch.handleConn(tcpConn)
 	}
+}
+
+// reclaimLoopbackPort kills whatever still listens on a loopback TCP port, so a re-run of
+// launchbrig never binds behind a stale instance (the two-VMs footgun). Loopback only — it
+// never touches a process holding a non-local port. The current process is skipped.
+func reclaimLoopbackPort(addr string) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil || (host != "127.0.0.1" && host != "localhost" && host != "::1") {
+		return
+	}
+	out, _ := exec.Command("lsof", "-ti", "tcp:"+port, "-sTCP:LISTEN").Output()
+	me := strconv.Itoa(os.Getpid())
+	for _, pid := range strings.Fields(string(out)) {
+		if pid != me {
+			_ = exec.Command("kill", "-9", pid).Run()
+		}
+	}
+	time.Sleep(200 * time.Millisecond)
 }
