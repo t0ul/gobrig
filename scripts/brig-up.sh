@@ -27,6 +27,13 @@ echo "==> rebuilding guest binaries (stale baked binaries silently disable the h
 GOOS=linux GOARCH="$GUEST_ARCH" CGO_ENABLED=0 \
   go build -o "$ROOT/vm-assets/detonationd" "$ROOT/cmd/detonationd"
 
+if [ ! -f "$ROOT/vm-assets/Image" ]; then
+  echo "brig-up: vm-assets/Image (Linux kernel) not found. The launcher is built, but the"
+  echo "         boot assets (kernel Image, initramfs.cpio.gz, alpine-root, sandbox_init.sh)"
+  echo "         are not provisioned yet (CH-2c: asset prep). Nothing to boot."
+  exit 0
+fi
+
 echo "==> building the host launcher (cgo + Virtualization.framework)"
 go build -o "$ROOT/bin/launchbrig" "$ROOT/cmd/launchbrig"
 
