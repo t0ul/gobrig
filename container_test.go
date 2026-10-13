@@ -98,6 +98,26 @@ func TestEscapeMountKnobs(t *testing.T) {
 	}
 }
 
+// TestHostNetwork: the default container isolates the network (its own netns); HostNetwork
+// drops the network namespace so a service inside binds the host loopback and is reachable.
+func TestHostNetwork(t *testing.T) {
+	if !nsHas(decode(t, gobrig.ContainerSpec{Rootfs: "rootfs"}), "network") {
+		t.Error("default container should isolate the network namespace")
+	}
+	if nsHas(decode(t, gobrig.ContainerSpec{Rootfs: "rootfs", HostNetwork: true}), "network") {
+		t.Error("HostNetwork should drop the network namespace")
+	}
+}
+
+func nsHas(m map[string]any, typ string) bool {
+	for _, n := range m["linux"].(map[string]any)["namespaces"].([]any) {
+		if n.(map[string]any)["type"] == typ {
+			return true
+		}
+	}
+	return false
+}
+
 func mountsContain(m map[string]any, dest string) bool {
 	for _, mt := range m["mounts"].([]any) {
 		if mt.(map[string]any)["destination"] == dest {

@@ -19,6 +19,8 @@ type ContainerSpec struct {
 	NoSeccomp        bool   // omit the seccomp filter even when not privileged
 	MountDockerSock  bool   // bind /var/run/docker.sock into the container (classic escape)
 	WritableHostPath string // bind this host path into the container, writable ("" = none)
+	HostNetwork      bool   // share the host's network namespace (no netns) — a misconfig, and
+	// what lets a service in the container be reached on the host's loopback
 }
 
 // Minimal OCI runtime-spec subset (what runc needs to start a container).
@@ -134,13 +136,14 @@ func OCIConfig(s ContainerSpec) ([]byte, error) {
 		mounts = append(mounts, ociMount{Destination: "/host", Type: "bind", Source: s.WritableHostPath, Options: []string{"rbind", "rw"}})
 	}
 
-	lx := ociLinux{
-		// No cgroup namespace: the Brig's minimal kernel does not enable it, and it is not
-		// needed for the escape classes. pid/ipc/uts/mount/network give the container boundary.
-		Namespaces: []ociNamespace{
-			{Type: "pid"}, {Type: "ipc"}, {Type: "uts"}, {Type: "mount"}, {Type: "network"},
-		},
+	// No cgroup namespace: the Brig's kernel runtime does not need it for the escape
+	// classes. HostNetwork drops the network namespace too, so a service in the container
+	// binds the host's loopback and is reachable from the guest — itself a misconfig.
+	ns := []ociNamespace{{Type: "pid"}, {Type: "ipc"}, {Type: "uts"}, {Type: "mount"}}
+	if !s.HostNetwork {
+		ns = append(ns, ociNamespace{Type: "network"})
 	}
+	lx := ociLinux{Namespaces: ns}
 	if s.Privileged {
 		// A privileged container drops the path protections and the seccomp filter.
 		lx.Seccomp = nil

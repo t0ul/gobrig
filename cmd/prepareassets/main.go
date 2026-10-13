@@ -202,21 +202,29 @@ func prepareRunc(dir string) error {
 // (so the misconfig knobs are chosen at run time). The guest runc run reads this bundle.
 func prepareBundle(dir string) error {
 	bundleRoot := filepath.Join(dir, "bundle", "rootfs")
-	if _, err := os.Stat(bundleRoot); err == nil {
-		fmt.Println("bundle: already present")
-		return nil
+	if _, err := os.Stat(bundleRoot); err != nil {
+		if err := os.MkdirAll(bundleRoot, 0o755); err != nil {
+			return err
+		}
+		fmt.Println("bundle: copying Alpine rootfs into the container bundle...")
+		// System cp -a preserves perms and device nodes the Go copy cannot recreate unprivileged.
+		src := filepath.Join(dir, "alpine-root") + string(os.PathSeparator) + "."
+		if out, err := exec.Command("cp", "-a", src, bundleRoot).CombinedOutput(); err != nil {
+			return fmt.Errorf("cp rootfs: %v: %s", err, out)
+		}
+	} else {
+		fmt.Println("bundle: rootfs already present")
 	}
-	if err := os.MkdirAll(bundleRoot, 0o755); err != nil {
-		return err
+	// Always rebuild the known-vuln target into the bundle (stale-binary footgun).
+	fmt.Println("bundle: cross-compiling vulnapp (the known-vuln RCE target)...")
+	cmd := exec.Command("go", "build", "-o", filepath.Join(bundleRoot, "vulnapp"), "./cmd/vulnapp")
+	cmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH=arm64", "CGO_ENABLED=0")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("build vulnapp: %v: %s", err, out)
 	}
-	fmt.Println("bundle: copying Alpine rootfs into the container bundle...")
-	// System cp -a preserves perms and device nodes the Go copy cannot recreate unprivileged.
-	src := filepath.Join(dir, "alpine-root") + string(os.PathSeparator) + "."
-	out, err := exec.Command("cp", "-a", src, bundleRoot).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("cp rootfs: %v: %s", err, out)
-	}
-	return nil
+	// The in-container canary: the secret a successful RCE *inside the container* can read,
+	// the proof the exploit reached code execution (distinct from the host-escape canary).
+	return os.WriteFile(filepath.Join(bundleRoot, "flag-in-container"), []byte("BRIG-RCE-INCONTAINER-7c21\n"), 0o644)
 }
 
 // --- inlined download / extract helpers (no verification; VM provisioning assets) ---
