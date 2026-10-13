@@ -203,7 +203,11 @@ func driveConsole(hostReader io.Reader, vmWriter io.Writer) {
 // bringUpCmd mounts the shared assets, chroots into Alpine, and runs sandbox_init.sh with
 // GOBRIG=1 set so in-guest code can detect the Brig (the Warden's marker). No networking is
 // brought up: the Brig is egress-denied by construction.
-const bringUpCmd = "mkdir -p /mnt/assets && mount -t virtiofs assets /mnt/assets && cp -a /mnt/assets/alpine-root /alpine && mkdir -p /alpine/mnt/assets && mount -o bind /mnt/assets /alpine/mnt/assets && mount -t proc none /alpine/proc && mount -t sysfs none /alpine/sys && mount -o bind /dev /alpine/dev && chroot /alpine /bin/sh -c 'GOBRIG=1 /bin/sh /mnt/assets/sandbox_init.sh'\n"
+// The alpine root is a tmpfs (a real mount), not a plain dir on the initramfs ramfs:
+// ramfs rejects the mount-propagation changes a container runtime makes on /, so runc
+// cannot prepare a rootfs there. tmpfs supports them, so the chroot root is a tmpfs the
+// alpine userland is copied into.
+const bringUpCmd = "mkdir -p /mnt/assets && mount -t virtiofs assets /mnt/assets && mkdir -p /alpine && mount -t tmpfs -o size=2g tmpfs /alpine && cp -a /mnt/assets/alpine-root/. /alpine/ && mkdir -p /alpine/mnt/assets && mount -o bind /mnt/assets /alpine/mnt/assets && mount -t proc none /alpine/proc && mount -t sysfs none /alpine/sys && mount -o bind /dev /alpine/dev && chroot /alpine /bin/sh -c 'GOBRIG=1 /bin/sh /mnt/assets/sandbox_init.sh'\n"
 
 // startVsockBridge accepts TCP on host loopback and pipes each connection to the guest's
 // vsock listener through the chamber (which applies -reset-each).

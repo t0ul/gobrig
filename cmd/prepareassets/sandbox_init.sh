@@ -21,6 +21,11 @@ fi
 # build. Best-effort, never fatal.
 chmod +x /mnt/assets/detonationd /mnt/assets/runc 2>/dev/null || true
 
+# Mount the unified cgroup hierarchy so runc can run containers (the kernel has cgroups
+# compiled in, but nothing mounts /sys/fs/cgroup in this minimal init). Best-effort.
+mkdir -p /sys/fs/cgroup 2>/dev/null || true
+mount -t cgroup2 none /sys/fs/cgroup 2>/dev/null || true
+
 # The daemon runs as ROOT inside the Brig. The Brig is the containment boundary (a
 # disposable, egress-denied VM with no NIC), so root-in-the-guest is required and safe: a
 # benchmark must run — and then escape — misconfigured containers, which needs root to
