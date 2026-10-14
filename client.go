@@ -29,9 +29,16 @@ type Result struct {
 // runs host-side — driving container setup and the oracle check — and is plain net/http
 // with no cgo, so it builds and tests anywhere.
 type Client struct {
-	Bridge string       // host bridge address, e.g. 127.0.0.1:5050
-	HTTP   *http.Client // nil uses a 30s client
+	Bridge  string       // host bridge address, e.g. 127.0.0.1:5050
+	HTTP    *http.Client // nil uses a 30s client
+	MaxResp int64        // max bridge response bytes; <=0 uses defaultMaxResp
 }
+
+// defaultMaxResp bounds the bridge response read. It must comfortably exceed a real web
+// asset a tool might fetch through the Brig (e.g. a single-page app's main.js, which runs
+// well over 1 MiB), or the Result JSON is truncated and fails to decode. 32 MiB still bounds
+// memory against a runaway command's output.
+const defaultMaxResp = 32 << 20
 
 func (c Client) httpClient() *http.Client {
 	if c.HTTP != nil {
@@ -55,7 +62,11 @@ func (c Client) Detonate(ctx context.Context, d Detonation) (Result, error) {
 		return Result{}, err
 	}
 	defer resp.Body.Close()
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	max := c.MaxResp
+	if max <= 0 {
+		max = defaultMaxResp
+	}
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, max))
 	if resp.StatusCode != http.StatusOK {
 		return Result{}, fmt.Errorf("gobrig: bridge %s: HTTP %d", c.Bridge, resp.StatusCode)
 	}
