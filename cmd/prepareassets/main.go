@@ -222,6 +222,16 @@ func prepareBundle(dir string) error {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("build vulnapp: %v: %s", err, out)
 	}
+	// Pre-place the fallback reverse-shell client at /revshell so the foothold rung can
+	// exercise the "no native technique" path on this bench target. On a real engagement the
+	// harness prefers the target's OWN tools (discovered) and only delivers this as a last
+	// resort; here it is pre-placed so the fallback technique is testable.
+	fmt.Println("bundle: cross-compiling revshell (fallback reverse-shell client)...")
+	rc := exec.Command("go", "build", "-ldflags=-s -w", "-o", filepath.Join(bundleRoot, "revshell"), "./cmd/revshell")
+	rc.Env = append(os.Environ(), "GOOS=linux", "GOARCH=arm64", "CGO_ENABLED=0")
+	if out, err := rc.CombinedOutput(); err != nil {
+		return fmt.Errorf("build revshell: %v: %s", err, out)
+	}
 	// The in-container canary: the secret a successful RCE *inside the container* can read,
 	// the proof the exploit reached code execution (distinct from the host-escape canary).
 	return os.WriteFile(filepath.Join(bundleRoot, "flag-in-container"), []byte("BRIG-RCE-INCONTAINER-7c21\n"), 0o644)
